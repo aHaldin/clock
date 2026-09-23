@@ -1,0 +1,7 @@
+'use client';
+import {useState} from 'react';
+import {LockKeyhole,ArrowRight} from 'lucide-react';
+import {api} from '../kiosk';
+export default function AdminLogin(){const[password,setPassword]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+async function submit(e:React.FormEvent){e.preventDefault();setError('');setBusy(true);try{await api('admin/login',{password});setPassword('');window.location.assign('/admin')}catch(e:any){setError(e.message);setPassword('');setBusy(false)}}
+return <><header><a className="brand" href="/"><span className="mark">PH</span>Podcast House</a><a className="header-link" href="/">Studio clock</a></header><main className="login card"><span className="eyebrow">Administration</span><h1>Admin sign-in</h1><p className="muted">Enter your admin password to manage engineers and timesheets.</p><form className="stack" onSubmit={submit}><label className="field">Admin password<input autoFocus type="password" autoComplete="current-password" required maxLength={512} value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/></label><button className="primary wide" disabled={busy||!password}>{busy?'Signing in…':'Sign in'}<ArrowRight size={18}/></button>{error&&<div className="notice error" role="alert">{error}</div>}</form><p className="security-note"><LockKeyhole size={16}/>Engineer PINs cannot access the dashboard.</p></main></>}

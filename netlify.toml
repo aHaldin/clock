@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Next.js is detected by Netlify's official framework adapter.
+# @netlify/database provisions Postgres; migrations live in netlify/database/migrations.

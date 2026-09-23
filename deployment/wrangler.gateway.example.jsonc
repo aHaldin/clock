@@ -1,0 +1,8 @@
+{
+  "name": "podcast-house-studio-gateway",
+  "main": "gateway.mjs",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "studio-clock.YOUR-DOMAIN.example", "custom_domain": true }],
+  "vars": { "APP_ORIGIN": "https://YOUR-APP-ORIGIN.example" }
+}

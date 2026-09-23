@@ -1,0 +1,8 @@
+// Deploy separately on the studio hostname in YOUR Cloudflare account.
+// Only TLS metadata, never client headers, can establish device identity.
+import {hmac,sha} from '../lib/security.mjs';
+export default {async fetch(request,env){const u=new URL(request.url);const upstream=new URL(env.APP_ORIGIN);const isClock=u.pathname.startsWith('/api/clock/')||u.pathname==='/api/device';const headers=new Headers(request.headers);headers.delete('x-ph-device-proof');headers.delete('oai-authenticated-user-id');headers.delete('oai-authenticated-user-email');headers.delete('oai-authenticated-user-full-name');
+if(u.pathname.startsWith('/admin')||u.pathname.startsWith('/api/admin')||u.pathname.includes('signin-with-chatgpt')||u.pathname.includes('callback'))return new Response('Use the separate admin address.',{status:403});
+const body=request.method==='GET'||request.method==='HEAD'?'':await request.text();if(body.length>8192&&isClock)return new Response('Request too large',{status:413});
+if(isClock){const tls=request.cf?.tlsClientAuth;if(tls?.certVerified!=='SUCCESS'||tls.certRevoked==='1'||!tls.certFingerprintSHA256)return Response.json({error:'An approved studio device certificate is required.'},{status:403});const fingerprint=tls.certFingerprintSHA256.replaceAll(':','').toLowerCase(),at=Date.now(),nonce=crypto.randomUUID();const payload=[request.method,u.pathname+u.search,await sha(body),fingerprint,at,nonce].join('\n');headers.set('x-ph-device-proof',JSON.stringify({fingerprint,at,nonce,signature:await hmac(env.DEVICE_GATEWAY_SECRET,payload)}));}
+upstream.pathname=u.pathname;upstream.search=u.search;return fetch(upstream,{method:request.method,headers,body:body||undefined,redirect:'manual'});}};
