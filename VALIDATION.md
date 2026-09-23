@@ -9,3 +9,7 @@
 - Legacy Cloudflare build tooling, secrets, local databases and generated output are excluded from GitHub.
 
 Not yet verified: deployment to the user's Netlify account, database provisioning there, its live backup/restore process, or true distributed load. PGlite exercises PostgreSQL semantics but does not simulate multiple networked Postgres connections. Browser approval is explicitly not hardware-bound device identity. Existing local records have not been migrated.
+
+## Netlify login origin regression
+
+Four additional origin tests pass, covering an internal function URL with a public site origin, exact preview URLs, local same-origin use, and rejection of unrelated origins and forged forwarding headers. Production build and TypeScript pass. The fix reads trusted Netlify runtime URLs and embeds only public deploy origins at build time. Live login still needs verification after Netlify deploys the commit.

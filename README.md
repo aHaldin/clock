@@ -19,6 +19,10 @@ The hosted database starts empty. Existing SQLite/D1 records on the original lap
 
 [Netlify Next.js documentation](https://docs.netlify.com/build/frameworks/framework-setup-guides/nextjs/overview/) · [Database provisioning and connection](https://docs.netlify.com/build/data-and-storage/netlify-database/tooling/) · [Automatic migrations](https://docs.netlify.com/build/data-and-storage/netlify-database/migrations/)
 
+## Login origin checks
+
+Requests accept the exact configured application origin, Netlify's runtime `URL` / `SITE_NAME`, and the deployment URLs embedded at build time. No wildcard Netlify domains or caller-controlled forwarded headers are trusted. For an additional custom domain, set `APP_ORIGIN` to its full HTTPS origin and redeploy. An origin error happens before password validation.
+
 ## Browser approval and admin access
 
 Clocking requires both an active engineer PIN and an admin-issued browser cookie, checked on every server request. The URL and a PIN alone are insufficient. The cookie is random, stored only as a hash in the database, HttpOnly, Secure, SameSite=Strict and valid for one year. Clear cookies to remove it locally, or revoke it through **Clocking access → Manage** to reject it server-side and invalidate pending engineer sessions. Remote admin login does not itself approve clocking access.
