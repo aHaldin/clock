@@ -9,7 +9,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build --webpack",
     "start": "next start --hostname 127.0.0.1",
-    "test": "node --test tests/app.test.mjs tests/postgres.test.mjs tests/origin.test.mjs tests/api-error.test.mjs tests/database.test.mjs",
+    "test": "node --test tests/app.test.mjs tests/postgres.test.mjs tests/origin.test.mjs tests/api-error.test.mjs tests/database.test.mjs tests/location.test.mjs",
     "typecheck": "tsc --noEmit",
     "setup:env": "node scripts/setup-env.mjs",
     "db:migrate": "node --env-file=.env.local scripts/migrate.mjs"

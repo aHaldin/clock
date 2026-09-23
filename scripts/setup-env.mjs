@@ -10,7 +10,7 @@ let password,confirmation;
 try{process.stdout.write('Admin password (hidden): ');password=await input.question('');process.stdout.write('\nConfirm password (hidden): ');confirmation=await input.question('');}finally{input.close();process.stdout.write('\n')}
 if(password!==confirmation||password.length<12||password.length>512)throw Error('Passwords must match and contain 12–512 characters.');
 const hash=await hashAdminPassword(password),pepper=crypto.randomUUID()+crypto.randomUUID();
-const config=h=>`ADMIN_PASSWORD_HASH='${h}'\nPIN_PEPPER=${pepper}\nBROWSER_CLOCKING=true\n`;
+const config=h=>`ADMIN_PASSWORD_HASH='${h}'\nPIN_PEPPER=${pepper}\nANY_DEVICE_CLOCKING=true\nBROWSER_CLOCKING=true\n`;
 // Next.js expands dotenv dollars; the Netlify import file uses the unescaped value.
 writeFileSync('.env.local',config(hash.replaceAll('$','\\$'))+'DATABASE_URL=\n',{mode:0o600});
 writeFileSync('.env.netlify',config(hash),{mode:0o600});

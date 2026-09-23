@@ -26,7 +26,7 @@ async function req(path,body={},token,fp=fingerprint){const raw=JSON.stringify(b
 async function clock(service,path,body={},token){const {r,raw}=await req(path,body,token);return service.clock(r,path,body,raw)}
 test('PIN security: fixed length, unique, keyed hash, wrong and inactive rejected',async()=>{const {admin,service,db}=await setup();await assert.rejects(pinHash('123',env.PIN_PEPPER),/six-digit/);assert.notEqual(await pinHash('123456',env.PIN_PEPPER),'123456');await assert.rejects(clock(service,'verify',{pin:'999999'}),/recognised/);await assert.rejects(admin.editEngineer({name:'Other',pin:'123456',active:true}),/already assigned/);const e=await db.prepare('SELECT * FROM engineers').first();await admin.editEngineer({id:e.id,name:e.name,active:false});await assert.rejects(clock(service,'verify',{pin:'123456'}),/recognised/)});
 test('five failed PIN attempts lock the device; successful use does not consume limit',async()=>{const {service}=await setup();for(let i=0;i<7;i++)await clock(service,'verify',{pin:'123456'});for(let i=0;i<5;i++)await assert.rejects(clock(service,'verify',{pin:'000000'}),/recognised/);await assert.rejects(clock(service,'verify',{pin:'123456'}),/15 minutes/)});
-test('clock in/out saved once; simultaneous duplicate requests cannot create duplicates',async()=>{const {service,db}=await setup();const a=await clock(service,'verify',{pin:'123456'}),b=await clock(service,'verify',{pin:'123456'});const results=await Promise.allSettled([clock(service,'in',{},a.token),clock(service,'in',{},b.token)]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await db.prepare('SELECT * FROM shifts').all()).results.length,1);const c=await clock(service,'verify',{pin:'123456'}),d=await clock(service,'verify',{pin:'123456'});assert.ok(c.data.shiftId);const outs=await Promise.allSettled([clock(service,'out',{shiftId:c.data.shiftId},c.token),clock(service,'out',{shiftId:d.data.shiftId},d.token)]);assert.equal(outs.filter(r=>r.status==='fulfilled').length,1);assert.ok((await db.prepare('SELECT * FROM shifts').first()).ended_at);await assert.rejects(clock(service,'out',{shiftId:c.data.shiftId},c.token),/expired/)});
+test('clock in/out saved once; simultaneous duplicate requests cannot create duplicates',async()=>{const {service,db}=await setup();service.env={...env,LOCATION_REQUIRED:'true'};const location={latitude:51.5,longitude:0,accuracy:20,capturedAt:Date.now()};const a=await clock(service,'verify',{pin:'123456'}),b=await clock(service,'verify',{pin:'123456'});const results=await Promise.allSettled([clock(service,'in',{location},a.token),clock(service,'in',{location},b.token)]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal((await db.prepare('SELECT * FROM shifts').all()).results.length,1);const c=await clock(service,'verify',{pin:'123456'}),d=await clock(service,'verify',{pin:'123456'});assert.ok(c.data.shiftId);const outs=await Promise.allSettled([clock(service,'out',{shiftId:c.data.shiftId,location},c.token),clock(service,'out',{shiftId:d.data.shiftId,location},d.token)]);assert.equal(outs.filter(r=>r.status==='fulfilled').length,1);assert.ok((await db.prepare('SELECT * FROM shifts').first()).ended_at);assert.equal((await db.prepare('SELECT * FROM clock_locations').all()).results.length,2);await assert.rejects(clock(service,'out',{shiftId:c.data.shiftId,location},c.token),/expired/)});
 test('engineer session cannot access admin methods; allowlist is exact',async()=>{const {db,service}=await setup();await assert.rejects(service.report(new URLSearchParams()),/Administrator/);await assert.rejects(service.editEngineer({}),/Administrator/);await assert.rejects(service.correct({}),/Administrator/);await assert.rejects(service.deviceEdit({}),/Administrator/);await assert.rejects(service.history('x'),/Administrator/);await assert.rejects(service.export(new URLSearchParams()),/Administrator/);await assert.rejects(new Service(db,env,{userId:'admin'}).report(new URLSearchParams()),/Administrator/)});
 test('unapproved, tampered, replayed and revoked device proofs rejected',async()=>{const {service,admin}=await setup();await assert.rejects(service.device(new Request('https://app.test/api/device'),''),/approved studio/);const p=await req('verify',{pin:'123456'});await service.device(p.r,p.raw);await assert.rejects(service.device(p.r,p.raw),/already been used/);const q=await req('verify',{pin:'123456'});await assert.rejects(service.device(q.r,'{}'),/could not be verified/);const unknown=await req('verify',{},null,'b'.repeat(64));await assert.rejects(service.device(unknown.r,unknown.raw),/not approved/);await admin.deviceEdit({name:'Studio A',fingerprint,active:false});const r=await req('verify');await assert.rejects(service.device(r.r,r.raw),/revoked/);await assert.rejects(deviceProof(r.r,r.raw,''),/not configured/)});
 test('sessions are device-bound, expire and are invalidated by PIN reset',async()=>{const {service,admin,db}=await setup();const v=await clock(service,'verify',{pin:'123456'});await admin.deviceEdit({name:'Other',fingerprint:'b'.repeat(64),active:true});const p=await req('in',{},v.token,'b'.repeat(64));await assert.rejects(service.clock(p.r,'in',{},p.raw),/expired/);await db.prepare('UPDATE sessions SET expires=0').run();await assert.rejects(clock(service,'in',{},v.token),/expired/);const fresh=await clock(service,'verify',{pin:'123456'});const e=await db.prepare('SELECT * FROM engineers').first();await admin.editEngineer({id:e.id,name:e.name,pin:'654321',active:true});await assert.rejects(clock(service,'in',{},fresh.token),/expired/);await assert.rejects(clock(service,'verify',{pin:'123456'}),/recognised/)});
@@ -88,4 +88,42 @@ test('hosted browser approval requires admin, rejects unknown and expired browse
  await admin.deviceEdit({...device,active:false});
  await assert.rejects(service.device(request(cookie),''),/revoked/);
  await assert.rejects(service.clock(request(cookie+'; ph_session='+pending.token),'out',{shiftId:pending.data.shiftId},''),/revoked/);
+});
+
+test('any device uses signed sessions, requires fresh location, records immutable events and preserves admin permissions',async()=>{
+ const {prepareAnyDevice}=await import('../lib/any-device.mjs');
+ const {db}=await setup(),config={...env,ANY_DEVICE_CLOCKING:'true',LOCATION_REQUIRED:'true'},service=new Service(db,config),admin=new Service(db,config,{userId:'admin-1'});
+ const prepared=await prepareAnyDevice(new Request('https://app.test/api/device'),config);
+ assert.match(prepared.cookie,/HttpOnly; Secure; SameSite=Strict/);
+ const cookie=prepared.cookie.split(';')[0];
+ const request=token=>new Request('https://app.test/api/clock/in',{headers:{cookie:cookie+(token?'; ph_session='+token:'')}});
+ assert.equal((await service.device(request(),'')).mode,'any');
+ await assert.rejects(service.device(new Request('https://app.test/api/device',{headers:{cookie:'ph_kiosk=forged'}}),''),/Reload/);
+ const verify=await service.clock(request(),'verify',{pin:'123456'},'');
+ assert.deepEqual(Object.keys(verify.data).sort(),['name','shiftId','startedAt']);
+ const location={latitude:51.5074,longitude:-0.1278,accuracy:24,capturedAt:Date.now()};
+ await assert.rejects(service.clock(request(verify.token),'in',{},''),/Location is required/);
+ for(const invalid of [{...location,latitude:91},{...location,accuracy:-1},{...location,capturedAt:Date.now()-180000},{...location,longitude:'0'}])await assert.rejects(service.clock(request(verify.token),'in',{location:invalid},''),/valid location/);
+ assert.equal((await db.prepare('SELECT * FROM shifts').all()).results.length,0);
+ const saved=await service.clock(request(verify.token),'in',{location},'');
+ let rows=(await db.prepare('SELECT * FROM clock_locations').all()).results;assert.equal(rows.length,1);assert.equal(rows[0].recorded_at,saved.data.at);assert.equal(rows[0].latitude,location.latitude);
+ await assert.rejects(db.prepare('DELETE FROM clock_locations').run(),/immutable/);
+ await assert.rejects(db.prepare('UPDATE clock_locations SET accuracy=1').run(),/immutable/);
+ const again=await service.clock(request(),'verify',{pin:'123456'},'');
+ await assert.rejects(service.clock(request(again.token),'in',{location},''),/Already clocked/);
+ assert.equal((await db.prepare('SELECT * FROM clock_locations').all()).results.length,1);
+ await assert.rejects(service.clock(request(again.token),'out',{shiftId:saved.data.shiftId},''),/Location is required/);
+ await service.clock(request(again.token),'out',{shiftId:saved.data.shiftId,location:{...location,capturedAt:Date.now()}},'');
+ rows=(await db.prepare('SELECT * FROM clock_locations').all()).results;assert.equal(rows.length,2);assert.equal(rows[1].action,'out');
+ const report=await admin.report(new URLSearchParams());assert.equal(report.anyDeviceClocking,true);assert.equal(report.shifts[0].locations.length,2);
+ await assert.rejects(service.report(new URLSearchParams()),/Administrator/);
+ const shift=report.shifts[0];await admin.correct({id:shift.id,version:shift.version,start:new Date(shift.started_at-1000).toISOString(),end:new Date(shift.ended_at).toISOString(),reason:'Correct start'});
+ assert.equal((await db.prepare('SELECT * FROM clock_locations').all()).results.length,2);
+});
+
+test('public PIN attempts are limited even when anonymous browser cookies are reset',async()=>{
+ const {prepareAnyDevice}=await import('../lib/any-device.mjs');const {db}=await setup(),config={...env,ANY_DEVICE_CLOCKING:'true'},service=new Service(db,config);
+ await db.prepare('INSERT INTO attempts(key,count,until) VALUES(?,?,?)').bind('public-pin-failures',100,Date.now()+900000).run();
+ const prepared=await prepareAnyDevice(new Request('https://app.test/api/device'),config);
+ await assert.rejects(service.clock(prepared.req,'verify',{pin:'123456'},''),/15 minutes/);
 });
